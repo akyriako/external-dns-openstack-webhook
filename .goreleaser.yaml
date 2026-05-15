@@ -36,7 +36,7 @@ dockers:
   - ids:
       - external-dns-openstack-webhook
     image_templates:
-      - ghcr.io/inovex/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-amd64
     goos: linux
     goarch: amd64
     dockerfile: goreleaser.dockerfile
@@ -47,7 +47,7 @@ dockers:
   - ids:
       - external-dns-openstack-webhook
     image_templates:
-      - ghcr.io/inovex/{{ .ProjectName }}:{{ .Version }}-arm64
+      - ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-arm64
     goos: linux
     goarch: arm64
     dockerfile: goreleaser.dockerfile
@@ -57,10 +57,10 @@ dockers:
     use: buildx
 
 docker_manifests:
-  - name_template: "ghcr.io/inovex/{{ .ProjectName }}:{{ .Version }}"
+  - name_template: "ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}"
     image_templates:
-      - "ghcr.io/inovex/{{ .ProjectName }}:{{ .Version }}-amd64"
-      - "ghcr.io/inovex/{{ .ProjectName }}:{{ .Version }}-arm64"
+      - "ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-amd64"
+      - "ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-arm64"
 
 archives:
   - name_template: "{{ .ProjectName }}-{{ .Version }}.{{ .Os }}-{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}"
@@ -75,12 +75,12 @@ checksum:
 # Configuration for GitHub Releases
 release:
   github:
-    owner: inovex
+    owner: akyriako
     name: external-dns-openstack-webhook
   footer: |
     ## Docker Images
-    - ghcr.io/inovex/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }} (universal, multi-platform)
-    - ghcr.io/inovex/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-amd64
-    - ghcr.io/inovex/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-arm64
+    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }} (universal, multi-platform)
+    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-amd64
+    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-arm64
   prerelease: auto
   replace_existing_draft: true
