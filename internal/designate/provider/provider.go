@@ -193,11 +193,6 @@ func (p designateProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, e
 					ep.Labels[designateZoneType] = string(zoneType)
 					ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
 
-					ep.ProviderSpecific = append(ep.ProviderSpecific, endpoint.ProviderSpecificProperty{
-						Name:  zoneTypeCustomAnnotationKey,
-						Value: string(zoneType),
-					})
-
 					result = append(result, ep)
 
 					return nil
@@ -279,10 +274,9 @@ func addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEnd
 func addDesignateMetadataFromExistingEndpoints(existingEndpoints []*endpoint.Endpoint, ep *endpoint.Endpoint) {
 	_, hasZoneIDLabel := ep.Labels[designateZoneID]
 	_, hasRecordSetIDLabel := ep.Labels[designateRecordSetID]
-	_, hasZoneType := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey)
 	_, hasZoneTypeLabel := ep.Labels[designateZoneType]
 
-	if hasZoneIDLabel && hasRecordSetIDLabel && hasZoneType {
+	if hasZoneIDLabel && hasRecordSetIDLabel && hasZoneTypeLabel {
 		return
 	}
 
@@ -306,18 +300,9 @@ func addDesignateMetadataFromExistingEndpoints(existingEndpoints []*endpoint.End
 			ep.Labels[designateRecordSetID] = oep.Labels[designateRecordSetID]
 		}
 
-		if !hasZoneType {
-			if value, ok := oep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
-				ep.ProviderSpecific = append(ep.ProviderSpecific, endpoint.ProviderSpecificProperty{
-					Name:  zoneTypeCustomAnnotationKey,
-					Value: value,
-				})
-
-				if !hasZoneTypeLabel {
-					if value, ok := oep.Labels[designateZoneType]; ok {
-						ep.Labels[designateZoneType] = value
-					}
-				}
+		if !hasZoneTypeLabel {
+			if value, ok := oep.Labels[designateZoneType]; ok {
+				ep.Labels[designateZoneType] = value
 			}
 		}
 
