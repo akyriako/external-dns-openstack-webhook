@@ -23,20 +23,18 @@ import (
 
 	"external-dns-openstack-webhook/internal/metrics"
 
-	"github.com/gophercloud/gophercloud/v2"
-	"github.com/gophercloud/gophercloud/v2/openstack"
-	"github.com/gophercloud/gophercloud/v2/openstack/config"
-	"github.com/gophercloud/gophercloud/v2/openstack/config/clouds"
-	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/recordsets"
-	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/zones"
-	"github.com/gophercloud/gophercloud/v2/pagination"
+	golangsdk "github.com/opentelekomcloud/gophertelekomcloud"
+	"github.com/opentelekomcloud/gophertelekomcloud/openstack"
+	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/recordsets"
+	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/zones"
+	"github.com/opentelekomcloud/gophertelekomcloud/pagination"
 	log "github.com/sirupsen/logrus"
 )
 
-// interface between provider and OpenStack DNS API
+// DesignateClientInterface interface between provider and OpenStack DNS API
 type DesignateClientInterface interface {
 	// ForEachZone calls handler for each zone managed by the Designate
-	ForEachZone(ctx context.Context, handler func(zone *zones.Zone) error) error
+	ForEachZone(ctx context.Context, zoneType string, handler func(zone *zones.Zone) error) error
 
 	// ForEachRecordSet calls handler for each recordset in the given DNS zone
 	ForEachRecordSet(ctx context.Context, zoneID string, handler func(recordSet *recordsets.RecordSet) error) error
@@ -53,10 +51,10 @@ type DesignateClientInterface interface {
 
 // implementation of the DesignateClientInterface
 type designateClient struct {
-	serviceClient *gophercloud.ServiceClient
+	serviceClient *golangsdk.ServiceClient
 }
 
-// factory function for the DesignateClientInterface
+// NewDesignateClient factory function for the DesignateClientInterface
 func NewDesignateClient() (DesignateClientInterface, error) {
 	serviceClient, err := createDesignateServiceClient()
 	if err != nil {
@@ -66,39 +64,47 @@ func NewDesignateClient() (DesignateClientInterface, error) {
 }
 
 // authenticate in OpenStack and obtain Designate service endpoint
-func createDesignateServiceClient() (*gophercloud.ServiceClient, error) {
-	ctx := context.Background()
-
-	authOptions, endpointOptions, tlsConfig, err := clouds.Parse()
+func createDesignateServiceClient() (*golangsdk.ServiceClient, error) {
+	env := openstack.NewEnv("OS_")
+	cloud, err := env.Cloud()
 	if err != nil {
 		return nil, err
 	}
-	authOptions.AllowReauth = true
 
-	providerClient, err := config.NewProviderClient(ctx, authOptions, config.WithTLSConfig(tlsConfig))
+	providerClient, err := openstack.AuthenticatedClientFromCloud(cloud)
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("Using OpenStack Keystone at %s", providerClient.IdentityEndpoint)
+	log.Infof("Using T-Cloud Public IAM at %s", providerClient.IdentityEndpoint)
+
+	endpointOptions := golangsdk.EndpointOpts{Region: cloud.RegionName}
+	if availability := cloud.EndpointType; availability != "" {
+		endpointOptions.Availability = golangsdk.Availability(availability)
+	} else if cloud.Interface != "" {
+		endpointOptions.Availability = golangsdk.Availability(cloud.Interface)
+	}
 
 	client, err := openstack.NewDNSV2(providerClient, endpointOptions)
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("Found OpenStack Designate (DNS) service at %s", client.Endpoint)
+	log.Infof("Found T-Cloud Public DNS service at %s", client.Endpoint)
 	return client, nil
 }
 
 // ForEachZone calls handler for each zone managed by the Designate
-func (c designateClient) ForEachZone(ctx context.Context, handler func(zone *zones.Zone) error) error {
+func (c designateClient) ForEachZone(ctx context.Context, zoneType string, handler func(zone *zones.Zone) error) error {
 	startTime := time.Now()
 
-	pager := zones.List(c.serviceClient, zones.ListOpts{})
+	pager := zones.List(c.serviceClient, zones.ListOpts{
+		Type: zoneType,
+	})
+
 	var pageCount int
 	var zoneCount int
 
-	err := pager.EachPage(ctx,
-		func(ctx context.Context, page pagination.Page) (bool, error) {
+	err := pager.EachPage(
+		func(page pagination.Page) (bool, error) {
 			// Each page corresponds to a separate API call.
 			pageCount++
 			metrics.TotalApiCalls.Inc()
@@ -125,9 +131,9 @@ func (c designateClient) ForEachZone(ctx context.Context, handler func(zone *zon
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("ForEachZone failed after %v: %v", duration, err)
+		log.Errorf("ForEachZone type=%s failed after %v: %v", zoneType, duration, err)
 	} else {
-		log.Debugf("✓ ForEachZone completed: %d zones across %d pages in %v", zoneCount, pageCount, duration)
+		log.Debugf("ForEachZone type=%s completed: %d zones across %d pages in %v", zoneType, zoneCount, pageCount, duration)
 	}
 
 	return err
@@ -141,8 +147,8 @@ func (c designateClient) ForEachRecordSet(ctx context.Context, zoneID string, ha
 	var pageCount int
 	var recordCount int
 
-	err := pager.EachPage(ctx,
-		func(ctx context.Context, page pagination.Page) (bool, error) {
+	err := pager.EachPage(
+		func(page pagination.Page) (bool, error) {
 			// Each page corresponds to a separate API call.
 			pageCount++
 			metrics.TotalApiCalls.Inc()
@@ -184,7 +190,7 @@ func (c designateClient) CreateRecordSet(ctx context.Context, zoneID string, opt
 
 	log.Debugf("→ Creating recordset: %s (%s) with %d targets", opts.Name, opts.Type, len(opts.Records))
 
-	r, err := recordsets.Create(ctx, c.serviceClient, zoneID, opts).Extract()
+	r, err := recordsets.Create(c.serviceClient, zoneID, opts).Extract()
 
 	duration := time.Since(startTime)
 	metrics.ApiCallLatency.WithLabelValues("CreateRecordSet").Observe(duration.Seconds())
@@ -210,7 +216,7 @@ func (c designateClient) UpdateRecordSet(ctx context.Context, zoneID, recordSetI
 	}
 	log.Debugf("→ Updating recordset: %s with %d targets", recordSetID, recordCount)
 
-	_, err := recordsets.Update(ctx, c.serviceClient, zoneID, recordSetID, opts).Extract()
+	_, err := recordsets.Update(c.serviceClient, zoneID, recordSetID, opts).Extract()
 
 	duration := time.Since(startTime)
 	metrics.ApiCallLatency.WithLabelValues("UpdateRecordSet").Observe(duration.Seconds())
@@ -232,7 +238,7 @@ func (c designateClient) DeleteRecordSet(ctx context.Context, zoneID, recordSetI
 
 	log.Debugf("→ Deleting recordset: %s", recordSetID)
 
-	err := recordsets.Delete(ctx, c.serviceClient, zoneID, recordSetID).ExtractErr()
+	err := recordsets.Delete(c.serviceClient, zoneID, recordSetID).ExtractErr()
 
 	duration := time.Since(startTime)
 	metrics.ApiCallLatency.WithLabelValues("DeleteRecordSet").Observe(duration.Seconds())
