@@ -1,6 +1,6 @@
 /*
 gopyright 2017 The Kubernetes Authors.
-Copyright 2024 inovex GmbH.
+Copyright 2026 T-Systems International GmbH.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -98,11 +98,11 @@ func canonicalizeDomainName(d string) string {
 
 // returns ZoneID -> ZoneName mapping for zones that are managed by the Designate and match domain filter
 func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[string]string, error) {
-	slog.Info("getting zone", "zone_type", zoneType)
-
 	result := map[string]string{}
 
 	err := p.client.ForEachZone(ctx, zoneType, func(zone *zones.Zone) error {
+		slog.Info("getting zone", "zone", zone.Name, "zone_type_tcp", zone.ZoneType, "zone_type_webhook", zoneType)
+
 		if zone.Status == "DELETE" || !zoneMatchesVisibility(zone, zoneType) {
 			return nil
 		}
@@ -127,7 +127,7 @@ func zoneMatchesVisibility(zone *zones.Zone, zoneType string) bool {
 }
 
 func getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
-	slog.Debug("endpoint %s/%s ProviderSpecific=%+v", ep.DNSName, ep.RecordType, ep.ProviderSpecific)
+	slog.Debug("processing endpoint", "record", ep.DNSName, "record_type", ep.RecordType, "provider_specific_annotations", ep.ProviderSpecific)
 	zoneType := zoneTypeCustomAnnotationDefaultValue
 
 	if value, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
@@ -332,7 +332,7 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet) e
 		return err
 	}
 
-	slog.Info("updating recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID, "record_set_id", rs.recordSetID)
+	slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID, "record_set_id", rs.recordSetID)
 
 	if rs.zoneID == "" {
 		rs.zoneID = getHostZoneID(rs.dnsName, managedZones)
