@@ -1,10 +1,11 @@
 package main
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 
 	"external-dns-openstack-webhook/internal/designate/provider"
@@ -22,10 +23,17 @@ const (
 
 func main() {
 	var domainFilters []string
+	var debugLevel int
+
 	pflag.StringArrayVar(&domainFilters, "domain-filter", []string{}, "List of domains to work on (can be specified multiple times)")
+	pflag.IntVar(&debugLevel, "debug-level", -4, "Log Level")
 	pflag.Parse()
 
-	log.SetLevel(log.DebugLevel)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.Level(debugLevel),
+	}))
+
+	slog.SetDefault(logger)
 
 	startedChan := make(chan struct{})
 	httpApiStarted := false
@@ -44,7 +52,7 @@ func main() {
 	m.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 
 	go func() {
-		log.Debugf("Starting status server on %s", statusServerAddr)
+		slog.Info("starting status server", "addr", statusServerAddr)
 		s := &http.Server{
 			Addr:    statusServerAddr,
 			Handler: m,
@@ -52,23 +60,27 @@ func main() {
 
 		l, err := net.Listen("tcp", statusServerAddr)
 		if err != nil {
-			log.Fatal(err)
+			slog.Error("starting status listener failed: %s", err)
+			os.Exit(-1)
 		}
 		err = s.Serve(l)
 		if err != nil {
-			log.Fatalf("status listener stopped : %s", err)
+			slog.Error("status listener stopped: %s", err)
+			os.Exit(-1)
 		}
 	}()
 
 	epf := endpoint.NewDomainFilter(domainFilters)
 	dp, err := provider.NewDesignateProvider(*epf, false)
 	if err != nil {
-		log.Fatalf("NewDesignateProvider: %v", err)
+		slog.Error("creating new DNS provider failed: %v", err)
 		metrics.OpenstackConnectionMetric.Set(0)
+
+		os.Exit(-1)
 	}
 	metrics.OpenstackConnectionMetric.Set(1)
-	log.Debugf("Connected to OpenStack API")
+	slog.Debug("connected to T-Cloud Public API")
 
-	log.Debugf("Starting webhook server on %s", webhookServerAddr)
+	slog.Debug("starting webhook server", "addr", webhookServerAddr)
 	api.StartHTTPApi(dp, startedChan, 0, 0, webhookServerAddr)
 }

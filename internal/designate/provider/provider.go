@@ -20,12 +20,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/recordsets"
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/zones"
-	log "github.com/sirupsen/logrus"
-
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/plan"
 	"sigs.k8s.io/external-dns/provider"
@@ -99,6 +98,8 @@ func canonicalizeDomainName(d string) string {
 
 // returns ZoneID -> ZoneName mapping for zones that are managed by the Designate and match domain filter
 func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[string]string, error) {
+	slog.Info("getting zone", "zone_type", zoneType)
+
 	result := map[string]string{}
 
 	err := p.client.ForEachZone(ctx, zoneType, func(zone *zones.Zone) error {
@@ -126,9 +127,11 @@ func zoneMatchesVisibility(zone *zones.Zone, zoneType string) bool {
 }
 
 func getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
+	slog.Debug("endpoint %s/%s ProviderSpecific=%+v", ep.DNSName, ep.RecordType, ep.ProviderSpecific)
 	zoneType := zoneTypeCustomAnnotationDefaultValue
 
 	if value, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
+		slog.Debug("found custom annotation ", "key", fmt.Sprintf("%s/%s", "external-dns.alpha.kubernetes.io", zoneTypeCustomAnnotationKey), "value", value)
 		zoneType = ZoneType(strings.ToLower(strings.TrimSpace(value)))
 	}
 
@@ -329,14 +332,12 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet) e
 		return err
 	}
 
+	slog.Info("updating recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID, "record_set_id", rs.recordSetID)
+
 	if rs.zoneID == "" {
 		rs.zoneID = getHostZoneID(rs.dnsName, managedZones)
 		if rs.zoneID == "" {
-			log.Debugf(
-				"Skipping record %s because no %s hosted zone matching record DNS Name was detected",
-				rs.dnsName,
-				rs.zoneType,
-			)
+			slog.Debug("upserting record skipped: no matching zone detected", "record", rs.dnsName, "zone_type", rs.zoneType)
 			return nil
 		}
 	}
@@ -357,14 +358,14 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet) e
 			Records: records,
 			TTL:     rs.ttl,
 		}
-		log.Infof("Creating records: %s/%s: %s", rs.dnsName, rs.recordType, strings.Join(records, ","))
+		slog.Info("creating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","))
 		if p.dryRun {
 			return nil
 		}
 		_, err := p.client.CreateRecordSet(ctx, rs.zoneID, opts)
 		return err
 	} else if len(records) == 0 {
-		log.Infof("Deleting records for %s/%s", rs.dnsName, rs.recordType)
+		slog.Info("deleting records", "record", rs.dnsName, "record_type", rs.recordType)
 		if p.dryRun {
 			return nil
 		}
@@ -374,7 +375,7 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet) e
 			Records: records,
 			TTL:     rs.ttl,
 		}
-		log.Infof("Updating records: %s/%s: %s", rs.dnsName, rs.recordType, strings.Join(records, ","))
+		slog.Info("updating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","))
 		if p.dryRun {
 			return nil
 		}

@@ -19,6 +19,8 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"external-dns-openstack-webhook/internal/metrics"
@@ -28,7 +30,6 @@ import (
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/recordsets"
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/zones"
 	"github.com/opentelekomcloud/gophertelekomcloud/pagination"
-	log "github.com/sirupsen/logrus"
 )
 
 // DesignateClientInterface interface between provider and OpenStack DNS API
@@ -75,7 +76,7 @@ func createDesignateServiceClient() (*golangsdk.ServiceClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("Using T-Cloud Public IAM at %s", providerClient.IdentityEndpoint)
+	slog.Info("using T-Cloud Public IAM", "addr", providerClient.IdentityEndpoint)
 
 	endpointOptions := golangsdk.EndpointOpts{Region: cloud.RegionName}
 	if availability := cloud.EndpointType; availability != "" {
@@ -88,7 +89,7 @@ func createDesignateServiceClient() (*golangsdk.ServiceClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("Found T-Cloud Public DNS service at %s", client.Endpoint)
+	slog.Info("using T-Cloud Public DNS", "addr", client.Endpoint)
 	return client, nil
 }
 
@@ -131,9 +132,9 @@ func (c designateClient) ForEachZone(ctx context.Context, zoneType string, handl
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("ForEachZone type=%s failed after %v: %v", zoneType, duration, err)
+		slog.Error(fmt.Sprintf("getting recordsets failed: %v", err), "zone_type", zoneType, "duration", duration)
 	} else {
-		log.Debugf("ForEachZone type=%s completed: %d zones across %d pages in %v", zoneType, zoneCount, pageCount, duration)
+		slog.Debug("getting recordsets completed", "zone_type", zoneType, "zones_count", zoneCount, "page_count", pageCount, "duration", duration)
 	}
 
 	return err
@@ -175,9 +176,9 @@ func (c designateClient) ForEachRecordSet(ctx context.Context, zoneID string, ha
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("ForEachRecordSet failed for zone %s after %v: %v", zoneID, duration, err)
+		slog.Error(fmt.Sprintf("getting records failed: %v", err), "zone_id", zoneID, "duration", duration)
 	} else {
-		log.Debugf("✓ ForEachRecordSet zone=%s: %d records across %d pages in %v", zoneID, recordCount, pageCount, duration)
+		slog.Debug("getting records completed", "zone_id", zoneID, "record_count", recordCount, "page_count", pageCount, "duration", duration)
 	}
 
 	return err
@@ -188,7 +189,7 @@ func (c designateClient) CreateRecordSet(ctx context.Context, zoneID string, opt
 	startTime := time.Now()
 	metrics.TotalApiCalls.Inc()
 
-	log.Debugf("→ Creating recordset: %s (%s) with %d targets", opts.Name, opts.Type, len(opts.Records))
+	slog.Debug("creating recordset", "record_set", opts.Name, "recordset_type", opts.Type, "targets", len(opts.Records))
 
 	r, err := recordsets.Create(c.serviceClient, zoneID, opts).Extract()
 
@@ -197,11 +198,11 @@ func (c designateClient) CreateRecordSet(ctx context.Context, zoneID string, opt
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("✗ CreateRecordSet failed for %s after %v: %v", opts.Name, duration, err)
+		slog.Error(fmt.Sprintf("creating recordset failed: %v", err), "record_set", opts.Name, "duration", duration)
 		return "", err
 	}
 
-	log.Debugf("✓ CreateRecordSet successful: %s (ID: %s) in %v", opts.Name, r.ID, duration)
+	slog.Debug("created recordset", "record_set", opts.Name, "record_set_id", r.ID, "duration", duration)
 	return r.ID, nil
 }
 
@@ -214,7 +215,7 @@ func (c designateClient) UpdateRecordSet(ctx context.Context, zoneID, recordSetI
 	if opts.Records != nil {
 		recordCount = len(opts.Records)
 	}
-	log.Debugf("→ Updating recordset: %s with %d targets", recordSetID, recordCount)
+	slog.Debug("updating recordset", "record-set-id", recordSetID, "targets", recordCount)
 
 	_, err := recordsets.Update(c.serviceClient, zoneID, recordSetID, opts).Extract()
 
@@ -223,9 +224,9 @@ func (c designateClient) UpdateRecordSet(ctx context.Context, zoneID, recordSetI
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("✗ UpdateRecordSet failed for %s after %v: %v", recordSetID, duration, err)
+		slog.Error(fmt.Sprintf("updating recordset failed: %v", err), "record-set-id", recordSetID, "duration", duration)
 	} else {
-		log.Debugf("✓ UpdateRecordSet successful: %s in %v", recordSetID, duration)
+		slog.Debug("updated recordset", "record-set-id", recordSetID, "duration", duration)
 	}
 
 	return err
@@ -236,7 +237,7 @@ func (c designateClient) DeleteRecordSet(ctx context.Context, zoneID, recordSetI
 	startTime := time.Now()
 	metrics.TotalApiCalls.Inc()
 
-	log.Debugf("→ Deleting recordset: %s", recordSetID)
+	slog.Debug("deleting recordset", "record-set-id", recordSetID)
 
 	err := recordsets.Delete(c.serviceClient, zoneID, recordSetID).ExtractErr()
 
@@ -245,9 +246,9 @@ func (c designateClient) DeleteRecordSet(ctx context.Context, zoneID, recordSetI
 
 	if err != nil {
 		metrics.FailedApiCallsTotal.Inc()
-		log.Errorf("✗ DeleteRecordSet failed for %s after %v: %v", recordSetID, duration, err)
+		slog.Error(fmt.Sprintf("deleting recordset failed: %v", err), "record-set-id", recordSetID, "duration", duration)
 	} else {
-		log.Debugf("✓ DeleteRecordSet successful: %s in %v", recordSetID, duration)
+		slog.Debug("deleted recordset", "record-set-id", recordSetID, "duration", duration)
 	}
 
 	return err
