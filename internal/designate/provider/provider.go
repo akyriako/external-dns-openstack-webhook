@@ -49,7 +49,7 @@ const (
 	designateOriginalRecords = "designate-original-records"
 
 	// provider-specific key, it will be automatically prefixed with external-dns.alpha.kubernetes.io/
-	zoneTypeCustomAnnotationKey          = "webhook-zone-type"
+	zoneTypeCustomAnnotationKey          = "webhook/zone-type"
 	zoneTypeCustomAnnotationDefaultValue = ZoneTypePublic
 )
 
@@ -101,7 +101,7 @@ func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[s
 	result := map[string]string{}
 
 	err := p.client.ForEachZone(ctx, zoneType, func(zone *zones.Zone) error {
-		slog.Info("getting zone", "zone", zone.Name, "zone_type_tcp", zone.ZoneType, "zone_type_webhook", zoneType)
+		slog.Info("getting zone", "zone", zone.Name, "zone_type", zone.ZoneType)
 
 		if zone.Status == "DELETE" || !zoneMatchesVisibility(zone, zoneType) {
 			return nil
@@ -332,7 +332,7 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet) e
 		return err
 	}
 
-	slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID, "record_set_id", rs.recordSetID)
+	slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
 
 	if rs.zoneID == "" {
 		rs.zoneID = getHostZoneID(rs.dnsName, managedZones)

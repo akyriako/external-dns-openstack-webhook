@@ -26,7 +26,7 @@ func main() {
 	var debugLevel int
 
 	pflag.StringArrayVar(&domainFilters, "domain-filter", []string{}, "List of domains to work on (can be specified multiple times)")
-	pflag.IntVar(&debugLevel, "debug-level", -4, "Log Level")
+	pflag.IntVar(&debugLevel, "debug-level", 0, "Log Level")
 	pflag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
