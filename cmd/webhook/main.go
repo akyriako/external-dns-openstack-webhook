@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/pflag"
 
@@ -38,7 +37,7 @@ func main() {
 				switch a.Key {
 				case slog.TimeKey:
 					t := a.Value.Time()
-					return slog.String("time", t.UTC().Format(time.RFC3339Nano))
+					return slog.String("time", t.Format("2006-01-02T15:04:05.00Z"))
 				case slog.LevelKey:
 					return slog.String("level", strings.ToLower(a.Value.String()))
 				}
