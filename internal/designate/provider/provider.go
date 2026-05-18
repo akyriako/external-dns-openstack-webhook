@@ -170,6 +170,7 @@ func (p designateProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, e
 					ep := endpoint.NewEndpointWithTTL(recordSet.Name, recordSet.Type, endpoint.TTL(recordSet.TTL), recordSet.Records...)
 					ep.Labels[designateRecordSetID] = recordSet.ID
 					ep.Labels[designateZoneID] = recordSet.ZoneID
+					ep.Labels[designateZoneType] = string(zoneType)
 					ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
 
 					result = append(result, ep)
@@ -264,7 +265,7 @@ func (p designateProvider) addDesignateMetadataFromExistingEndpoints(existingEnd
 		}
 
 		if desiredZoneType, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
-			existingZoneType, ok := oep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey)
+			existingZoneType, ok := oep.Labels[designateZoneType]
 			if !ok || existingZoneType != desiredZoneType {
 				continue
 			}
@@ -350,7 +351,7 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 	//	return err
 	//}
 
-	slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
+	//slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
 
 	if rs.zoneID == "" {
 		rs.zoneID = p.getHostZoneID(rs.dnsName, managedZones)
@@ -386,14 +387,14 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 			Records: records,
 			TTL:     rs.ttl,
 		}
-		slog.Info("creating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","))
+		slog.Info("creating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","), "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
 		_, err := p.client.CreateRecordSet(ctx, rs.zoneID, opts)
 		return err
 	} else if len(records) == 0 {
-		slog.Info("deleting records", "record", rs.dnsName, "record_type", rs.recordType)
+		slog.Info("deleting records", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
@@ -403,7 +404,7 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 			Records: records,
 			TTL:     rs.ttl,
 		}
-		slog.Info("updating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","))
+		slog.Info("updating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","), "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
