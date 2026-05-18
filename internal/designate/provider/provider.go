@@ -193,14 +193,6 @@ func (p designateProvider) enrichRecordSet(recordSet *recordsets.RecordSet, zone
 	ep.Labels[designateZoneType] = string(zoneType)
 	ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
 
-	// Enrich existing DNS records with the provider specific zone tyoe annotation
-	//ep.ProviderSpecific = endpoint.ProviderSpecific{
-	//	{
-	//		Name:  zoneTypeCustomAnnotationKey,
-	//		Value: string(zoneType),
-	//	},
-	//}
-
 	if zoneType == ZoneTypePrivate {
 		ep.ProviderSpecific = endpoint.ProviderSpecific{
 			{
