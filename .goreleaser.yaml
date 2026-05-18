@@ -1,14 +1,14 @@
-project_name: external-dns-openstack-webhook
+project_name: external-dns-opentelekomcloud-webhook
 before:
   hooks:
     - go mod tidy
     - go mod download
 
 builds:
-  - id: external-dns-openstack-webhook
+  - id: external-dns-opentelekomcloud-webhook
     dir: .
     main: ./cmd/webhook/
-    binary: external-dns-openstack-webhook
+    binary: external-dns-opentelekomcloud-webhook
     env:
       - CGO_ENABLED=0 # build a static binary without C dependencies
     flags:
@@ -34,7 +34,7 @@ builds:
 
 dockers:
   - ids:
-      - external-dns-openstack-webhook
+      - external-dns-opentelekomcloud-webhook
     image_templates:
       - ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-amd64
     goos: linux
@@ -45,7 +45,7 @@ dockers:
       - "--platform=linux/amd64"
     use: buildx
   - ids:
-      - external-dns-openstack-webhook
+      - external-dns-opentelekomcloud-webhook
     image_templates:
       - ghcr.io/akyriako/{{ .ProjectName }}:{{ .Version }}-arm64
     goos: linux
@@ -76,11 +76,11 @@ checksum:
 release:
   github:
     owner: akyriako
-    name: external-dns-openstack-webhook
+    name: external-dns-opentelekomcloud-webhook
   footer: |
     ## Docker Images
-    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }} (universal, multi-platform)
-    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-amd64
-    - ghcr.io/akyriako/external-dns-openstack-webhook:{{ trimprefix .Tag "v" }}-arm64
+    - ghcr.io/akyriako/external-dns-opentelekomcloud-webhook:{{ trimprefix .Tag "v" }} (universal, multi-platform)
+    - ghcr.io/akyriako/external-dns-opentelekomcloud-webhook:{{ trimprefix .Tag "v" }}-amd64
+    - ghcr.io/akyriako/external-dns-opentelekomcloud-webhook:{{ trimprefix .Tag "v" }}-arm64
   prerelease: auto
   replace_existing_draft: true

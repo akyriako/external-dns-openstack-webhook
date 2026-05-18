@@ -23,7 +23,7 @@ import (
 	"log/slog"
 	"time"
 
-	"external-dns-openstack-webhook/internal/metrics"
+	"external-dns-opentelekomcloud-webhook/internal/metrics"
 
 	golangsdk "github.com/opentelekomcloud/gophertelekomcloud"
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack"

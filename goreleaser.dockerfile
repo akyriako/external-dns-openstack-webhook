@@ -6,6 +6,6 @@ ENV HOME=/
 # Let's set some sane defaults to amekt
 ENV OS_CLIENT_CONFIG_FILE=/etc/openstack/clouds.yaml
 ENV OS_CLOUD=openstack
-COPY external-dns-openstack-webhook /external-dns-openstack-webhook
+COPY external-dns-opentelekomcloud-webhook /external-dns-opentelekomcloud-webhook
 USER 1000
-ENTRYPOINT ["/external-dns-openstack-webhook"]
+ENTRYPOINT ["/external-dns-opentelekomcloud-webhook"]

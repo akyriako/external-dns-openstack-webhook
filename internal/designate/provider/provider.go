@@ -23,14 +23,14 @@ import (
 	"log/slog"
 	"strings"
 
+	"external-dns-opentelekomcloud-webhook/internal/designate/client"
+
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/recordsets"
 	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/zones"
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/plan"
 	"sigs.k8s.io/external-dns/provider"
 )
-
-import "external-dns-openstack-webhook/internal/designate/client"
 
 type ZoneType string
 

@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"external-dns-openstack-webhook/internal/designate/provider"
-	"external-dns-openstack-webhook/internal/metrics"
+	"external-dns-opentelekomcloud-webhook/internal/designate/provider"
+	"external-dns-opentelekomcloud-webhook/internal/metrics"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"sigs.k8s.io/external-dns/endpoint"
