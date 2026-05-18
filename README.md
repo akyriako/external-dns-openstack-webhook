@@ -60,10 +60,33 @@ An existing file can be converted into a `Secret` via kubectl:
 kubectl create secret generic oscloudsyaml --namespace external-dns --from-file=clouds.yaml
 ```
 
-## Bugs or feature requests
+## Public vs. Private Zones
 
-This webhook certainly still contains bugs or lacks certain features.
-In such cases, please raise a GitHub issue with as much detail as possible. PRs with fixes and features are also very welcome.
+Private DNS zones can be managed by adding the `external-dns.alpha.kubernetes.io/webhook-zone-type: private` annotation 
+to a Kubernetes resource supported by ExternalDNS, such as a `Service`, `Ingress`, or `DNSEndpoint`. Records **without** this annotation 
+are treated **as public by default**. The webhook automatically resolves the correct Open Telekom Cloud DNS zone,
+based on the requested visibility and hostname. This allows public and private DNS records to coexist safely while using the same ExternalDNS deployment.
+
+e.g. for a `traefik/whoami` deployment:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: whoami.example.int
+    external-dns.alpha.kubernetes.io/target: 1.2.3.4
+    external-dns.alpha.kubernetes.io/webhook-zone-type: private
+spec:
+  type: ClusterIP
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+```
 
 ## Development
 
