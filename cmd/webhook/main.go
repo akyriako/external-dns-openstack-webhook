@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 
@@ -29,9 +31,22 @@ func main() {
 	pflag.IntVar(&debugLevel, "debug-level", 0, "Log Level")
 	pflag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.Level(debugLevel),
-	}))
+	logger := slog.New(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.Level(debugLevel),
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch a.Key {
+				case slog.TimeKey:
+					t := a.Value.Time()
+					return slog.String("time", t.UTC().Format(time.RFC3339Nano))
+				case slog.LevelKey:
+					return slog.String("level", strings.ToLower(a.Value.String()))
+				}
+
+				return a
+			},
+		}),
+	)
 
 	slog.SetDefault(logger)
 
@@ -74,11 +89,11 @@ func main() {
 	dp, err := provider.NewDesignateProvider(*epf, false)
 	if err != nil {
 		slog.Error("creating new DNS provider failed: %v", err)
-		metrics.OpenstackConnectionMetric.Set(0)
+		metrics.OpenTelekomCloudConnectionMetric.Set(0)
 
 		os.Exit(-1)
 	}
-	metrics.OpenstackConnectionMetric.Set(1)
+	metrics.OpenTelekomCloudConnectionMetric.Set(1)
 	slog.Debug("connected to T-Cloud Public API")
 
 	slog.Info("starting webhook server", "addr", webhookServerAddr)

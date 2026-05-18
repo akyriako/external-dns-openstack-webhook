@@ -389,16 +389,14 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 	if rs.zoneID == "" {
 		rs.zoneID = p.getHostZoneID(rs.dnsName, managedZones)
 		if rs.zoneID == "" {
-			err := fmt.Errorf("no matching zone detected")
-			slog.Error(err.Error(), "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
-			return err
+			slog.Error("no matching zone detected", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
+			return fmt.Errorf(fmt.Sprintf("no matching zone %s detected for %s/%s", rs.zoneType, rs.dnsName, rs.recordType))
 		}
 	}
 
 	if _, ok := managedZones[rs.zoneID]; !ok {
-		err := fmt.Errorf("zoneID does not belong to this zone type")
-		slog.Error(err.Error(), "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID)
-		return err
+		slog.Error("zoneID does not belong to this zone type", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID)
+		return fmt.Errorf(fmt.Sprintf("zoneID %s does not belong to zone type %s", rs.zoneID, rs.zoneType))
 	}
 
 	var records []string
