@@ -81,6 +81,6 @@ func main() {
 	metrics.OpenstackConnectionMetric.Set(1)
 	slog.Debug("connected to T-Cloud Public API")
 
-	slog.Debug("starting webhook server", "addr", webhookServerAddr)
+	slog.Info("starting webhook server", "addr", webhookServerAddr)
 	api.StartHTTPApi(dp, startedChan, 0, 0, webhookServerAddr)
 }
