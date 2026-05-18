@@ -45,7 +45,7 @@ const (
 	// Zone Type of the RecordSet
 	designateZoneType = "designate-zone-type"
 
-	// Initial records values of the RecordSet. This label is required in order not to loose records that haven't
+	// Initial records values of the RecordSet. This label is required in order not to lose records that haven't
 	// changed where there are several targets per domain and only some of them changed.
 	// Values are joined by zero-byte to in order to get a single string
 	designateOriginalRecords = "designate-original-records"
@@ -78,26 +78,6 @@ func NewDesignateProvider(domainFilter endpoint.DomainFilter, dryRun bool) (prov
 	}, nil
 }
 
-// converts domain names to FQDN
-func canonicalizeDomainNames(domains []string) []string {
-	var cDomains []string
-	for _, d := range domains {
-		if !strings.HasSuffix(d, ".") {
-			d += "."
-			cDomains = append(cDomains, strings.ToLower(d))
-		}
-	}
-	return cDomains
-}
-
-// converts domain name to FQDN
-func canonicalizeDomainName(d string) string {
-	if !strings.HasSuffix(d, ".") {
-		d += "."
-	}
-	return strings.ToLower(d)
-}
-
 // returns ZoneID -> ZoneName mapping for zones that are managed by the Designate and match domain filter
 func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[string]string, error) {
 	result := map[string]string{}
@@ -105,7 +85,7 @@ func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[s
 	err := p.client.ForEachZone(ctx, zoneType, func(zone *zones.Zone) error {
 		//slog.Info("getting zone", "zone", zone.Name, "zone_type", zone.ZoneType)
 
-		if zone.Status == "DELETE" || !zoneMatchesVisibility(zone, zoneType) {
+		if zone.Status == "DELETE" || !p.zoneMatchesVisibility(zone, zoneType) {
 			return nil
 		}
 
@@ -121,14 +101,14 @@ func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[s
 	return result, err
 }
 
-func zoneMatchesVisibility(zone *zones.Zone, zoneType string) bool {
+func (p designateProvider) zoneMatchesVisibility(zone *zones.Zone, zoneType string) bool {
 	if zoneType == "" || zone.ZoneType == "" {
 		return true
 	}
 	return strings.EqualFold(zone.ZoneType, zoneType)
 }
 
-func getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
+func (p designateProvider) getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
 	zoneType := zoneTypeCustomAnnotationDefaultValue
 
 	if value, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
@@ -151,8 +131,8 @@ func getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
 	}
 }
 
-// finds the best suitable DNS zone for the hostname
-func getHostZoneID(hostname string, managedZones map[string]string) string {
+// getHostZoneID finds the best suitable DNS zone for the hostname
+func (p designateProvider) getHostZoneID(hostname string, managedZones map[string]string) string {
 	longestZoneLength := 0
 	resultID := ""
 
@@ -190,11 +170,9 @@ func (p designateProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, e
 					ep := endpoint.NewEndpointWithTTL(recordSet.Name, recordSet.Type, endpoint.TTL(recordSet.TTL), recordSet.Records...)
 					ep.Labels[designateRecordSetID] = recordSet.ID
 					ep.Labels[designateZoneID] = recordSet.ZoneID
-					ep.Labels[designateZoneType] = string(zoneType)
 					ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
 
 					result = append(result, ep)
-
 					return nil
 				},
 			)
@@ -207,7 +185,7 @@ func (p designateProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, e
 	return result, nil
 }
 
-// temporary structure to hold recordset parameters so that we could aggregate endpoints into recordsets
+// recordSet temporary structure to hold recordset parameters so that we could aggregate endpoints into recordsets
 type recordSet struct {
 	dnsName     string
 	recordType  string
@@ -218,11 +196,11 @@ type recordSet struct {
 	zoneType    string
 }
 
-// adds endpoint into recordset aggregation, loading original values from endpoint labels first
-func addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEndpoints []*endpoint.Endpoint, delete bool) error {
-	addDesignateMetadataFromExistingEndpoints(oldEndpoints, ep)
+// addEndpoint adds endpoint into recordset aggregation, loading original values from endpoint labels first
+func (p designateProvider) addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEndpoints []*endpoint.Endpoint, delete bool) error {
+	p.addDesignateMetadataFromExistingEndpoints(oldEndpoints, ep)
 
-	zoneType, err := getZoneType(ep)
+	zoneType, err := p.getZoneType(ep)
 	if err != nil {
 		return err
 	}
@@ -271,7 +249,7 @@ func addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEnd
 // to an Endpoint. Therefore, it searches all given existing endpoints for an endpoint with the same record type and record
 // value. If the given Endpoint already has the labels set, they are left untouched. This fixes an issue with the
 // TXTRegistry which generates new TXT entries instead of updating the old ones.
-func addDesignateMetadataFromExistingEndpoints(existingEndpoints []*endpoint.Endpoint, ep *endpoint.Endpoint) {
+func (p designateProvider) addDesignateMetadataFromExistingEndpoints(existingEndpoints []*endpoint.Endpoint, ep *endpoint.Endpoint) {
 	_, hasZoneIDLabel := ep.Labels[designateZoneID]
 	_, hasRecordSetIDLabel := ep.Labels[designateRecordSetID]
 	_, hasZoneTypeLabel := ep.Labels[designateZoneType]
@@ -320,22 +298,22 @@ func (p designateProvider) ApplyChanges(ctx context.Context, changes *plan.Chang
 	recordSets := map[string]*recordSet{}
 
 	for _, ep := range changes.Create {
-		if err := addEndpoint(ep, recordSets, endpoints, false); err != nil {
+		if err := p.addEndpoint(ep, recordSets, endpoints, false); err != nil {
 			return err
 		}
 	}
 	for _, ep := range changes.UpdateOld {
-		if err := addEndpoint(ep, recordSets, endpoints, true); err != nil {
+		if err := p.addEndpoint(ep, recordSets, endpoints, true); err != nil {
 			return err
 		}
 	}
 	for _, ep := range changes.UpdateNew {
-		if err := addEndpoint(ep, recordSets, endpoints, false); err != nil {
+		if err := p.addEndpoint(ep, recordSets, endpoints, false); err != nil {
 			return err
 		}
 	}
 	for _, ep := range changes.Delete {
-		if err := addEndpoint(ep, recordSets, endpoints, true); err != nil {
+		if err := p.addEndpoint(ep, recordSets, endpoints, true); err != nil {
 			return err
 		}
 	}
@@ -375,21 +353,21 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 	slog.Info("upserting recordset", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
 
 	if rs.zoneID == "" {
-		rs.zoneID = getHostZoneID(rs.dnsName, managedZones)
+		rs.zoneID = p.getHostZoneID(rs.dnsName, managedZones)
 		if rs.zoneID == "" {
 			slog.Debug("upserting record skipped: no matching zone detected", "record", rs.dnsName, "zone_type", rs.zoneType)
 			return nil
 		}
+	}
 
-		if _, ok := managedZones[rs.zoneID]; !ok {
-			return fmt.Errorf(
-				"refusing to modify record %s/%s: zoneID %s does not belong to zone type %s",
-				rs.dnsName,
-				rs.recordType,
-				rs.zoneID,
-				rs.zoneType,
-			)
-		}
+	if _, ok := managedZones[rs.zoneID]; !ok {
+		return fmt.Errorf(
+			"refusing to modify record %s/%s: zoneID %s does not belong to zone type %s",
+			rs.dnsName,
+			rs.recordType,
+			rs.zoneID,
+			rs.zoneType,
+		)
 	}
 
 	var records []string
