@@ -1,6 +1,6 @@
 /*
-gopyright 2017 The Kubernetes Authors.
-Copyright 2026 Kyriakos Akriotis.
+Copyright 2017 The Kubernetes Authors.
+Copyright 2026 T-Systems International GmbH.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
