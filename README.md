@@ -11,7 +11,7 @@ and [its support for the `webhook` provider type]([https://kubernetes-sigs.githu
 > [!IMPORTANT]  
 > Crucial information necessary for users to succeed.
 Setting the `provider.name` to `webhook` allows configuration of the
-`external-dns-openstack-webhook` via a few additional values:
+`external-dns-opentelekomcloud-webhook` via a few additional values:
 
 ```yaml
 provider:
