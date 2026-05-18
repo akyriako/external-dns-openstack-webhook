@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout external-dns-openstack-webhook
+      - name: Checkout external-dns-opentelekomcloud-webhook
         uses: actions/checkout@v6
 
       - name: Checkout kubernetes-sigs/external-dns
@@ -38,7 +38,7 @@ jobs:
       - name: Install pip
         run: python -m pip install --upgrade pip
 
-      - name: go build external-dns-openstack-webhook
+      - name: go build external-dns-opentelekomcloud-webhook
         run: make build
 
       - name: go build external-dns
@@ -81,16 +81,16 @@ jobs:
         run: |
           while [ "$(openstack zone list -f csv | grep PENDING)" != "" ]; do date; openstack zone list -f value; sleep 1; done
 
-      - name: Start external-dns-openstack-webhook in background
+      - name: Start external-dns-opentelekomcloud-webhook in background
         run: |
-          ./build/bin/external-dns-openstack-webhook >/tmp/external-dns-openstack-webhook.log 2>&1 &
+          ./build/bin/external-dns-opentelekomcloud-webhook >/tmp/external-dns-opentelekomcloud-webhook.log 2>&1 &
 
       - name: Run external-dns
         run: ./build/external-dns --txt-owner-id my-cluster-id --provider webhook --source fake --log-level=debug --once 2>&1
         working-directory: ./external-dns
 
-      - name: Show /tmp/external-dns-openstack-webhook.log
-        run: cat /tmp/external-dns-openstack-webhook.log
+      - name: Show /tmp/external-dns-opentelekomcloud-webhook.log
+        run: cat /tmp/external-dns-opentelekomcloud-webhook.log
 
       - name: Wait for PENDING
         run: |

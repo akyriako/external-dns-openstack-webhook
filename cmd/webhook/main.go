@@ -5,11 +5,12 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spf13/pflag"
 
-	"external-dns-openstack-webhook/internal/designate/provider"
-	"external-dns-openstack-webhook/internal/metrics"
+	"external-dns-opentelekomcloud-webhook/internal/designate/provider"
+	"external-dns-opentelekomcloud-webhook/internal/metrics"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"sigs.k8s.io/external-dns/endpoint"
@@ -29,9 +30,22 @@ func main() {
 	pflag.IntVar(&debugLevel, "debug-level", 0, "Log Level")
 	pflag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.Level(debugLevel),
-	}))
+	logger := slog.New(
+		slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.Level(debugLevel),
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch a.Key {
+				case slog.TimeKey:
+					t := a.Value.Time()
+					return slog.String("time", t.Format("2006-01-02T15:04:05.00Z"))
+				case slog.LevelKey:
+					return slog.String("level", strings.ToLower(a.Value.String()))
+				}
+
+				return a
+			},
+		}),
+	)
 
 	slog.SetDefault(logger)
 
@@ -74,11 +88,11 @@ func main() {
 	dp, err := provider.NewDesignateProvider(*epf, false)
 	if err != nil {
 		slog.Error("creating new DNS provider failed: %v", err)
-		metrics.OpenstackConnectionMetric.Set(0)
+		metrics.OpenTelekomCloudConnectionMetric.Set(0)
 
 		os.Exit(-1)
 	}
-	metrics.OpenstackConnectionMetric.Set(1)
+	metrics.OpenTelekomCloudConnectionMetric.Set(1)
 	slog.Debug("connected to T-Cloud Public API")
 
 	slog.Info("starting webhook server", "addr", webhookServerAddr)
