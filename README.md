@@ -70,6 +70,29 @@ based on the requested visibility and hostname. This allows public and private D
 e.g. for a `traefik/whoami` deployment:
 
 ```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.11
+          args:
+            - --port=8080
+          ports:
+            - name: http
+              containerPort: 8080
+---
 apiVersion: v1
 kind: Service
 metadata:
