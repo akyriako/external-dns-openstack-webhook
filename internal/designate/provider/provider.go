@@ -1,6 +1,6 @@
 /*
-gopyright 2017 The Kubernetes Authors.
-Copyright 2024 inovex GmbH.
+Copyright 2017 The Kubernetes Authors.
+Copyright 2026 T-Systems International GmbH.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,12 +20,11 @@ package provider
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
-	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/recordsets"
-	"github.com/gophercloud/gophercloud/v2/openstack/dns/v2/zones"
-	log "github.com/sirupsen/logrus"
-
+	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/recordsets"
+	"github.com/opentelekomcloud/gophertelekomcloud/openstack/dns/v2/zones"
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/plan"
 	"sigs.k8s.io/external-dns/provider"
@@ -33,16 +32,29 @@ import (
 
 import "external-dns-openstack-webhook/internal/designate/client"
 
+type ZoneType string
+
 const (
+	ZoneTypePublic  ZoneType = "public"
+	ZoneTypePrivate ZoneType = "private"
+
 	// ID of the RecordSet from which endpoint was created
 	designateRecordSetID = "designate-recordset-id"
 	// Zone ID of the RecordSet
 	designateZoneID = "designate-record-id"
+	// Zone Type of the RecordSet
+	designateZoneType = "designate-zone-type"
 
-	// Initial records values of the RecordSet. This label is required in order not to loose records that haven't
+	// Initial records values of the RecordSet. This label is required in order not to lose records that haven't
 	// changed where there are several targets per domain and only some of them changed.
 	// Values are joined by zero-byte to in order to get a single string
 	designateOriginalRecords = "designate-original-records"
+
+	designateDefaultTTLValue int64 = 300
+
+	// provider-specific key, it will be automatically prefixed with external-dns.alpha.kubernetes.io/
+	zoneTypeCustomAnnotationKey          = "webhook/zone-type"
+	zoneTypeCustomAnnotationDefaultValue = ZoneTypePublic
 )
 
 // designate provider type
@@ -57,66 +69,77 @@ type designateProvider struct {
 
 // NewDesignateProvider is a factory function for OpenStack designate providers
 func NewDesignateProvider(domainFilter endpoint.DomainFilter, dryRun bool) (provider.Provider, error) {
-	client, err := client.NewDesignateClient()
+	c, err := client.NewDesignateClient()
 	if err != nil {
 		return nil, err
 	}
 	return &designateProvider{
-		client:       client,
+		client:       c,
 		domainFilter: domainFilter,
 		dryRun:       dryRun,
 	}, nil
 }
 
-// converts domain names to FQDN
-func canonicalizeDomainNames(domains []string) []string {
-	var cDomains []string
-	for _, d := range domains {
-		if !strings.HasSuffix(d, ".") {
-			d += "."
-			cDomains = append(cDomains, strings.ToLower(d))
-		}
-	}
-	return cDomains
-}
-
-// converts domain name to FQDN
-func canonicalizeDomainName(d string) string {
-	if !strings.HasSuffix(d, ".") {
-		d += "."
-	}
-	return strings.ToLower(d)
-}
-
 // returns ZoneID -> ZoneName mapping for zones that are managed by the Designate and match domain filter
-func (p designateProvider) getZones(ctx context.Context) (map[string]string, error) {
+func (p designateProvider) getZones(ctx context.Context, zoneType string) (map[string]string, error) {
 	result := map[string]string{}
 
-	err := p.client.ForEachZone(ctx,
-		func(zone *zones.Zone) error {
-			if zone.Type != "" && strings.ToUpper(zone.Type) != "PRIMARY" || zone.Status == "DELETE" {
-				return nil
-			}
+	err := p.client.ForEachZone(ctx, zoneType, func(zone *zones.Zone) error {
+		//slog.Info("getting zone", "zone", zone.Name, "zone_type", zone.ZoneType)
 
-			zoneName := canonicalizeDomainName(zone.Name)
-			if !p.domainFilter.Match(zoneName) {
-				return nil
-			}
-			result[zone.ID] = zoneName
+		if zone.Status == "DELETE" || !p.zoneMatchesVisibility(zone, zoneType) {
 			return nil
-		},
+		}
+
+		zoneName := canonicalizeDomainName(zone.Name)
+		if !p.domainFilter.Match(zoneName) {
+			return nil
+		}
+		result[zone.ID] = zoneName
+		return nil
+	},
 	)
 
 	return result, err
 }
 
-// finds best suitable DNS zone for the hostname
-func getHostZoneID(hostname string, managedZones map[string]string) string {
+func (p designateProvider) zoneMatchesVisibility(zone *zones.Zone, zoneType string) bool {
+	if zoneType == "" || zone.ZoneType == "" {
+		return true
+	}
+	return strings.EqualFold(zone.ZoneType, zoneType)
+}
+
+func (p designateProvider) getZoneType(ep *endpoint.Endpoint) (ZoneType, error) {
+	zoneType := zoneTypeCustomAnnotationDefaultValue
+
+	if value, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
+		zoneType = ZoneType(strings.ToLower(strings.TrimSpace(value)))
+	} else if value, ok := ep.Labels[designateZoneType]; ok {
+		zoneType = ZoneType(strings.ToLower(strings.TrimSpace(value)))
+	}
+
+	switch zoneType {
+	case ZoneTypePublic, ZoneTypePrivate:
+		return zoneType, nil
+	default:
+		return "", fmt.Errorf(
+			"invalid %s: %q (allowed: %s, %s)",
+			zoneTypeCustomAnnotationKey,
+			zoneType,
+			ZoneTypePublic,
+			ZoneTypePrivate,
+		)
+	}
+}
+
+// getHostZoneID finds the best suitable DNS zone for the hostname
+func (p designateProvider) getHostZoneID(hostname string, managedZones map[string]string) string {
 	longestZoneLength := 0
 	resultID := ""
 
 	for zoneID, zoneName := range managedZones {
-		if !strings.HasSuffix(hostname, "." + zoneName) && hostname != zoneName {
+		if !strings.HasSuffix(hostname, "."+zoneName) && hostname != zoneName {
 			continue
 		}
 		ln := len(zoneName)
@@ -132,35 +155,57 @@ func getHostZoneID(hostname string, managedZones map[string]string) string {
 // Records returns the list of records.
 func (p designateProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	var result []*endpoint.Endpoint
-	managedZones, err := p.getZones(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for zoneID := range managedZones {
-		err = p.client.ForEachRecordSet(ctx, zoneID,
-			func(recordSet *recordsets.RecordSet) error {
-				if recordSet.Type != endpoint.RecordTypeA && recordSet.Type != endpoint.RecordTypeTXT && recordSet.Type != endpoint.RecordTypeCNAME {
-					return nil
-				}
 
-				ep := endpoint.NewEndpointWithTTL(recordSet.Name, recordSet.Type, endpoint.TTL(recordSet.TTL), recordSet.Records...)
-				ep.Labels[designateRecordSetID] = recordSet.ID
-				ep.Labels[designateZoneID] = recordSet.ZoneID
-				ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
-				result = append(result, ep)
-
-				return nil
-			},
-		)
+	for _, zoneType := range []ZoneType{ZoneTypePublic, ZoneTypePrivate} {
+		managedZones, err := p.getZones(ctx, string(zoneType))
 		if err != nil {
 			return nil, err
+		}
+
+		for zoneID := range managedZones {
+			err = p.client.ForEachRecordSet(ctx, zoneID,
+				func(recordSet *recordsets.RecordSet) error {
+					ep := p.enrichRecordSet(recordSet, zoneType)
+					if ep != nil {
+						result = append(result, ep)
+					}
+					return nil
+				},
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	return result, nil
 }
 
-// temporary structure to hold recordset parameters so that we could aggregate endpoints into recordsets
+// enrichRecordSet Enrich existing DNS records with Designate metadata & Provider-specific Annotations
+func (p designateProvider) enrichRecordSet(recordSet *recordsets.RecordSet, zoneType ZoneType) *endpoint.Endpoint {
+	if recordSet.Type != endpoint.RecordTypeA && recordSet.Type != endpoint.RecordTypeTXT && recordSet.Type != endpoint.RecordTypeCNAME {
+		return nil
+	}
+
+	ep := endpoint.NewEndpointWithTTL(recordSet.Name, recordSet.Type, endpoint.TTL(recordSet.TTL), recordSet.Records...)
+	ep.Labels[designateRecordSetID] = recordSet.ID
+	ep.Labels[designateZoneID] = recordSet.ZoneID
+	ep.Labels[designateZoneType] = string(zoneType)
+	ep.Labels[designateOriginalRecords] = strings.Join(recordSet.Records, "\000")
+
+	if zoneType == ZoneTypePrivate {
+		ep.ProviderSpecific = endpoint.ProviderSpecific{
+			{
+				Name:  zoneTypeCustomAnnotationKey,
+				Value: string(zoneType),
+			},
+		}
+	}
+
+	return ep
+}
+
+// recordSet temporary structure to hold recordset parameters so that we could aggregate endpoints into recordsets
 type recordSet struct {
 	dnsName     string
 	recordType  string
@@ -168,21 +213,35 @@ type recordSet struct {
 	recordSetID string
 	ttl         int
 	names       map[string]bool
+	zoneType    string
 }
 
-// adds endpoint into recordset aggregation, loading original values from endpoint labels first
-func addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEndpoints []*endpoint.Endpoint, delete bool) {
-	key := fmt.Sprintf("%s/%s", ep.DNSName, ep.RecordType)
+// addEndpointInRecordSets adds endpoint into recordset aggregation, loading original values from endpoint labels first
+func (p designateProvider) addEndpointInRecordSets(ep *endpoint.Endpoint, recordSets map[string]*recordSet, records []*endpoint.Endpoint, delete bool) error {
+	p.enrichEndpointFromRecords(records, ep)
+
+	// fallback for new records that haven't an explicit ttl value in the manifest
+	if ep.RecordTTL == 0 {
+		ep.RecordTTL = endpoint.TTL(designateDefaultTTLValue)
+	}
+
+	zoneType, err := p.getZoneType(ep)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("%s/%s/%s", ep.DNSName, ep.RecordType, zoneType)
+
 	rs := recordSets[key]
 	if rs == nil {
 		rs = &recordSet{
 			dnsName:    canonicalizeDomainName(ep.DNSName),
 			recordType: ep.RecordType,
 			names:      make(map[string]bool),
+			zoneType:   string(zoneType),
+			ttl:        int(ep.RecordTTL),
 		}
 	}
-
-	addDesignateIDLabelsFromExistingEndpoints(oldEndpoints, ep)
 
 	if rs.zoneID == "" {
 		rs.zoneID = ep.Labels[designateZoneID]
@@ -190,88 +249,158 @@ func addEndpoint(ep *endpoint.Endpoint, recordSets map[string]*recordSet, oldEnd
 	if rs.recordSetID == "" {
 		rs.recordSetID = ep.Labels[designateRecordSetID]
 	}
-	rs.ttl = int(ep.RecordTTL)
+
 	for _, rec := range strings.Split(ep.Labels[designateOriginalRecords], "\000") {
 		if _, ok := rs.names[rec]; !ok && rec != "" {
 			rs.names[rec] = true
 		}
 	}
+
 	targets := ep.Targets
 	if ep.RecordType == endpoint.RecordTypeCNAME {
 		targets = canonicalizeDomainNames(targets)
 	}
+
 	for _, t := range targets {
 		rs.names[t] = !delete
 	}
+
 	recordSets[key] = rs
+	return nil
 }
 
-// addDesignateIDLabelsFromExistingEndpoints adds the labels identified by the constants designateZoneID and designateRecordSetID
+// enrichEndpointFromRecords adds the labels identified by the constants designateZoneID and designateRecordSetID
 // to an Endpoint. Therefore, it searches all given existing endpoints for an endpoint with the same record type and record
 // value. If the given Endpoint already has the labels set, they are left untouched. This fixes an issue with the
 // TXTRegistry which generates new TXT entries instead of updating the old ones.
-func addDesignateIDLabelsFromExistingEndpoints(existingEndpoints []*endpoint.Endpoint, ep *endpoint.Endpoint) {
+func (p designateProvider) enrichEndpointFromRecords(records []*endpoint.Endpoint, ep *endpoint.Endpoint) {
 	_, hasZoneIDLabel := ep.Labels[designateZoneID]
 	_, hasRecordSetIDLabel := ep.Labels[designateRecordSetID]
-	if hasZoneIDLabel && hasRecordSetIDLabel {
-		return
-	}
-	for _, oep := range existingEndpoints {
-		if ep.RecordType == oep.RecordType && ep.DNSName == oep.DNSName {
-			if !hasZoneIDLabel {
-				ep.Labels[designateZoneID] = oep.Labels[designateZoneID]
-			}
-			if !hasRecordSetIDLabel {
-				ep.Labels[designateRecordSetID] = oep.Labels[designateRecordSetID]
-			}
-			return
+	_, hasZoneTypeLabel := ep.Labels[designateZoneType]
+
+	//if hasZoneIDLabel && hasRecordSetIDLabel && hasZoneTypeLabel {
+	//	return
+	//}
+
+	for _, record := range records {
+		if ep.RecordType != record.RecordType || ep.DNSName != record.DNSName {
+			continue
 		}
+
+		desiredZoneType, err := p.getZoneType(ep)
+		if err != nil {
+			continue
+		}
+
+		existingZoneType := ZoneType(strings.ToLower(strings.TrimSpace(record.Labels[designateZoneType])))
+		if existingZoneType != desiredZoneType {
+			continue
+		}
+
+		//if desiredZoneType, ok := ep.GetProviderSpecificProperty(zoneTypeCustomAnnotationKey); ok {
+		//	existingZoneType, ok := existingEndpoint.Labels[designateZoneType]
+		//	if !ok || existingZoneType != desiredZoneType {
+		//		continue
+		//	}
+		//}
+
+		if !hasZoneIDLabel {
+			ep.Labels[designateZoneID] = record.Labels[designateZoneID]
+		}
+
+		if !hasRecordSetIDLabel {
+			ep.Labels[designateRecordSetID] = record.Labels[designateRecordSetID]
+		}
+
+		if !hasZoneTypeLabel {
+			if value, ok := record.Labels[designateZoneType]; ok {
+				ep.Labels[designateZoneType] = value
+			}
+		}
+
+		if ep.RecordTTL == 0 {
+			ep.RecordTTL = record.RecordTTL
+		}
+
+		return
 	}
 }
 
 // ApplyChanges applies a given set of changes in a given zone.
 func (p designateProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) error {
-	managedZones, err := p.getZones(ctx)
-	if err != nil {
-		return err
-	}
-
-	endpoints, err := p.Records(ctx)
+	records, err := p.Records(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch active records: %w", err)
 	}
 
 	recordSets := map[string]*recordSet{}
+
+	// UpdateOld current state from DNS provider <- Records()
+	// UpdateNew desired state from Kubernetes sources (service, ingress, crd etc.)
+
 	for _, ep := range changes.Create {
-		addEndpoint(ep, recordSets, endpoints, false)
+		if err := p.addEndpointInRecordSets(ep, recordSets, records, false); err != nil {
+			return err
+		}
 	}
 	for _, ep := range changes.UpdateOld {
-		addEndpoint(ep, recordSets, endpoints, true)
+		if err := p.addEndpointInRecordSets(ep, recordSets, records, true); err != nil {
+			return err
+		}
 	}
 	for _, ep := range changes.UpdateNew {
-		addEndpoint(ep, recordSets, endpoints, false)
+		if err := p.addEndpointInRecordSets(ep, recordSets, records, false); err != nil {
+			return err
+		}
 	}
 	for _, ep := range changes.Delete {
-		addEndpoint(ep, recordSets, endpoints, true)
+		if err := p.addEndpointInRecordSets(ep, recordSets, records, true); err != nil {
+			return err
+		}
 	}
 
+	managedZonesByType := map[string]map[string]string{}
+
 	for _, rs := range recordSets {
+		managedZones, ok := managedZonesByType[rs.zoneType]
+		if !ok {
+			var err2 error
+			managedZones, err2 = p.getZones(ctx, rs.zoneType)
+			if err2 != nil {
+				if err == nil {
+					err = err2
+				}
+				continue
+			}
+
+			managedZonesByType[rs.zoneType] = managedZones
+		}
+
 		if err2 := p.upsertRecordSet(ctx, rs, managedZones); err == nil {
 			err = err2
 		}
 	}
+
 	return err
 }
 
 // apply recordset changes by inserting/updating/deleting recordsets
 func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, managedZones map[string]string) error {
 	if rs.zoneID == "" {
-		rs.zoneID = getHostZoneID(rs.dnsName, managedZones)
+		rs.zoneID = p.getHostZoneID(rs.dnsName, managedZones)
 		if rs.zoneID == "" {
-			log.Debugf("Skipping record %s because no hosted zone matching record DNS Name was detected", rs.dnsName)
-			return nil
+			err := fmt.Errorf("no matching zone detected")
+			slog.Error(err.Error(), "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
+			return err
 		}
 	}
+
+	if _, ok := managedZones[rs.zoneID]; !ok {
+		err := fmt.Errorf("zoneID does not belong to this zone type")
+		slog.Error(err.Error(), "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType, "zone_id", rs.zoneID)
+		return err
+	}
+
 	var records []string
 	for rec, v := range rs.names {
 		if v {
@@ -288,14 +417,14 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 			Records: records,
 			TTL:     rs.ttl,
 		}
-		log.Infof("Creating records: %s/%s: %s", rs.dnsName, rs.recordType, strings.Join(records, ","))
+		slog.Info("creating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","), "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
 		_, err := p.client.CreateRecordSet(ctx, rs.zoneID, opts)
 		return err
 	} else if len(records) == 0 {
-		log.Infof("Deleting records for %s/%s", rs.dnsName, rs.recordType)
+		slog.Info("deleting records", "record", rs.dnsName, "record_type", rs.recordType, "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
@@ -303,9 +432,9 @@ func (p designateProvider) upsertRecordSet(ctx context.Context, rs *recordSet, m
 	} else {
 		opts := recordsets.UpdateOpts{
 			Records: records,
-			TTL:     &rs.ttl,
+			TTL:     rs.ttl,
 		}
-		log.Infof("Updating records: %s/%s: %s", rs.dnsName, rs.recordType, strings.Join(records, ","))
+		slog.Info("updating records", "record", rs.dnsName, "record_type", rs.recordType, "record_value", strings.Join(records, ","), "zone_type", rs.zoneType)
 		if p.dryRun {
 			return nil
 		}
